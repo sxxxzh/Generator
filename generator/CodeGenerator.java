@@ -309,8 +309,8 @@ public class CodeGenerator {
         
         content.append("public interface ").append(repositoryName).append(" extends JpaRepository<").append(className).append(", Long>, JpaSpecificationExecutor<").append(className).append("> {\n");
         
-        if ("User".equals(className)) {
-            content.append("    Optional<User> findByUsername(String username);\n");
+        if (getUserEntityClassName().equals(className)) {
+            content.append("    Optional<").append(getUserEntityClassName()).append("> findByUsername(String username);\n");
         }
         
         content.append("}\n");
@@ -452,6 +452,10 @@ public class CodeGenerator {
             content.append("import org.springframework.security.core.Authentication;\n");
             content.append("import org.springframework.security.core.context.SecurityContextHolder;\n");
         }
+
+        if (enableAuth && authConfig.isUserOwnedTable(table.getTableName())) {
+            content.append("import ").append(generatorConfig.getRepositoryPackage()).append(".").append(getUserEntityClassName()).append("Repository;\n");
+        }
         
         content.append("\n");
         
@@ -459,9 +463,23 @@ public class CodeGenerator {
         content.append("@RequestMapping(\"").append(generatorConfig.getApiPath()).append("/").append(entityName).append("\")\n");
         content.append("public class ").append(controllerName).append(" {\n\n");
         
+        boolean isUserOwned = enableAuth && authConfig.isUserOwnedTable(table.getTableName());
+
         content.append("    private final ").append(serviceName).append(" service;\n\n");
-        content.append("    public ").append(controllerName).append("(").append(serviceName).append(" service) {\n");
+
+        if (isUserOwned) {
+            content.append("    private final ").append(getUserEntityClassName()).append("Repository userRepository;\n\n");
+        }
+
+        content.append("    public ").append(controllerName).append("(").append(serviceName).append(" service");
+        if (isUserOwned) {
+            content.append(", ").append(getUserEntityClassName()).append("Repository userRepository");
+        }
+        content.append(") {\n");
         content.append("        this.service = service;\n");
+        if (isUserOwned) {
+            content.append("        this.userRepository = userRepository;\n");
+        }
         content.append("    }\n\n");
         
         if (enableAuth) {
@@ -469,12 +487,24 @@ public class CodeGenerator {
             content.append("        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();\n");
             content.append("        return authentication != null ? authentication.getName() : null;\n");
             content.append("    }\n\n");
-            
+
             content.append("    private boolean isAdmin() {\n");
             content.append("        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();\n");
             content.append("        return authentication != null && authentication.getAuthorities().stream()\n");
             content.append("                .anyMatch(auth -> auth.getAuthority().equals(\"ROLE_").append(adminRole).append("\"));\n");
             content.append("    }\n\n");
+
+            if (isUserOwned) {
+                content.append("    private Long getCurrentUserId() {\n");
+                content.append("        String username = getCurrentUsername();\n");
+                content.append("        if (username == null) {\n");
+                content.append("            throw new RuntimeException(\"未登录\");\n");
+                content.append("        }\n");
+                content.append("        return userRepository.findByUsername(username)\n");
+                content.append("                .map(").append(getUserEntityClassName()).append("::getId)\n");
+                content.append("                .orElseThrow(() -> new RuntimeException(\"当前用户不存在\"));\n");
+                content.append("    }\n\n");
+            }
         }
         
         content.append("    @GetMapping\n");
@@ -535,7 +565,7 @@ public class CodeGenerator {
         content.append("    public ApiResponse<").append(responseType).append("> update(@PathVariable Long id, @RequestBody ").append(requestType).append(" request) {\n");
         
         if (enableAuth) {
-            if ("User".equals(className)) {
+            if (getUserEntityClassName().equals(className)) {
                 content.append("        String currentUsername = getCurrentUsername();\n");
                 content.append("        return service.findById(id)\n");
                 content.append("                .map(existing -> {\n");
@@ -561,13 +591,12 @@ public class CodeGenerator {
                 content.append("                .orElse(ApiResponse.error(404, \"数据不存在\"));\n");
             } else if (authConfig.isUserOwnedTable(table.getTableName())) {
                 String userField = authConfig.getUserOwnedField(table.getTableName());
-                String userFieldName = Generator.util.StringUtils.toCamelCase(userField, false);
                 String userFieldGetter = Generator.util.StringUtils.toCamelCase(userField, true);
-                
-                content.append("        String currentUsername = getCurrentUsername();\n");
+
                 content.append("        return service.findById(id)\n");
                 content.append("                .map(existing -> {\n");
-                content.append("                    if (!isAdmin() && !existing.get").append(userFieldGetter).append("().equals(currentUsername)) {\n");
+                content.append("                    Long currentUserId = getCurrentUserId();\n");
+                content.append("                    if (!isAdmin() && !existing.get").append(userFieldGetter).append("().equals(currentUserId)) {\n");
                 content.append("                        throw new RuntimeException(\"只能修改自己的数据\");\n");
                 content.append("                    }\n");
                 
@@ -635,7 +664,7 @@ public class CodeGenerator {
         content.append("    }\n\n");
         
         if (enableAuth) {
-            if ("User".equals(className)) {
+            if (getUserEntityClassName().equals(className)) {
                 content.append("    @PreAuthorize(\"hasRole('").append(adminRole).append("')\")\n");
             } else if (authConfig.isUserOwnedTable(table.getTableName())) {
                 content.append("    @PreAuthorize(\"isAuthenticated()\")\n");
@@ -649,11 +678,11 @@ public class CodeGenerator {
         if (enableAuth && authConfig.isUserOwnedTable(table.getTableName())) {
             String userField = authConfig.getUserOwnedField(table.getTableName());
             String userFieldGetter = Generator.util.StringUtils.toCamelCase(userField, true);
-            
-            content.append("        String currentUsername = getCurrentUsername();\n");
+
             content.append("        return service.findById(id)\n");
             content.append("                .map(existing -> {\n");
-            content.append("                    if (!isAdmin() && !existing.get").append(userFieldGetter).append("().equals(currentUsername)) {\n");
+            content.append("                    Long currentUserId = getCurrentUserId();\n");
+            content.append("                    if (!isAdmin() && !existing.get").append(userFieldGetter).append("().equals(currentUserId)) {\n");
             content.append("                        throw new RuntimeException(\"只能删除自己的数据\");\n");
             content.append("                    }\n");
             content.append("                    service.deleteById(id);\n");
@@ -773,5 +802,9 @@ public class CodeGenerator {
         String name = column.getColumnName().toLowerCase();
         return name.startsWith("create_") || name.startsWith("created_")
             || name.startsWith("update_") || name.startsWith("updated_");
+    }
+
+    private String getUserEntityClassName() {
+        return Generator.util.StringUtils.toCamelCase(authConfig.getTableName(), true);
     }
 }

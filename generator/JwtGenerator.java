@@ -1,5 +1,6 @@
 package Generator.generator;
 
+import Generator.config.AuthConfig;
 import Generator.config.GeneratorConfig;
 import Generator.config.JwtConfig;
 import Generator.util.FileUtils;
@@ -9,10 +10,16 @@ import java.io.IOException;
 public class JwtGenerator {
     private final GeneratorConfig generatorConfig;
     private final JwtConfig jwtConfig;
-    
-    public JwtGenerator(GeneratorConfig generatorConfig, JwtConfig jwtConfig) {
+    private final AuthConfig authConfig;
+
+    public JwtGenerator(GeneratorConfig generatorConfig, JwtConfig jwtConfig, AuthConfig authConfig) {
         this.generatorConfig = generatorConfig;
         this.jwtConfig = jwtConfig;
+        this.authConfig = authConfig;
+    }
+
+    private String getUserEntityName() {
+        return Generator.util.StringUtils.toCamelCase(authConfig.getTableName(), true);
     }
     
     public void generateJwtUtils() throws IOException {
@@ -275,8 +282,8 @@ public class JwtGenerator {
         
         content.append("import ").append(generatorConfig.getCommonPackage()).append(".ApiResponse;\n");
         content.append("import ").append(generatorConfig.getCommonPackage()).append(".JwtUtils;\n");
-        content.append("import ").append(generatorConfig.getEntityPackage()).append(".User;\n");
-        content.append("import ").append(generatorConfig.getRepositoryPackage()).append(".UserRepository;\n");
+        content.append("import ").append(generatorConfig.getEntityPackage()).append(".").append(getUserEntityName()).append(";\n");
+        content.append("import ").append(generatorConfig.getRepositoryPackage()).append(".").append(getUserEntityName()).append("Repository;\n");
         content.append("import org.springframework.beans.factory.annotation.Autowired;\n");
         content.append("import org.springframework.security.authentication.AuthenticationManager;\n");
         content.append("import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;\n");
@@ -284,22 +291,22 @@ public class JwtGenerator {
         content.append("import org.springframework.security.core.AuthenticationException;\n");
         content.append("import org.springframework.security.crypto.password.PasswordEncoder;\n");
         content.append("import org.springframework.web.bind.annotation.*;\n\n");
-        
+
         content.append("import java.util.HashMap;\n");
         content.append("import java.util.Map;\n\n");
-        
+
         content.append("@RestController\n");
         content.append("@RequestMapping(\"").append(generatorConfig.getApiPath()).append("/auth\")\n");
         content.append("public class AuthController {\n\n");
-        
+
         content.append("    @Autowired\n");
         content.append("    private AuthenticationManager authenticationManager;\n\n");
-        
+
         content.append("    @Autowired\n");
         content.append("    private JwtUtils jwtUtils;\n\n");
-        
+
         content.append("    @Autowired\n");
-        content.append("    private UserRepository userRepository;\n\n");
+        content.append("    private ").append(getUserEntityName()).append("Repository userRepository;\n\n");
         
         content.append("    @Autowired\n");
         content.append("    private PasswordEncoder passwordEncoder;\n\n");
@@ -324,17 +331,17 @@ public class JwtGenerator {
         content.append("    }\n\n");
         
         content.append("    @PostMapping(\"/register\")\n");
-        content.append("    public ApiResponse<User> register(@RequestBody RegisterRequest registerRequest) {\n");
+        content.append("    public ApiResponse<").append(getUserEntityName()).append("> register(@RequestBody RegisterRequest registerRequest) {\n");
         content.append("        if (userRepository.findByUsername(registerRequest.getUsername()).isPresent()) {\n");
         content.append("            return ApiResponse.error(400, \"用户名已存在\");\n");
         content.append("        }\n\n");
-        
-        content.append("        User user = new User();\n");
+
+        content.append("        ").append(getUserEntityName()).append(" user = new ").append(getUserEntityName()).append("();\n");
         content.append("        user.setUsername(registerRequest.getUsername());\n");
         content.append("        user.setPassword(passwordEncoder.encode(registerRequest.getPassword()));\n");
         content.append("        user.setRole(registerRequest.getRole() != null ? registerRequest.getRole() : \"USER\");\n\n");
-        
-        content.append("        User savedUser = userRepository.save(user);\n");
+
+        content.append("        ").append(getUserEntityName()).append(" savedUser = userRepository.save(user);\n");
         content.append("        return ApiResponse.success(\"注册成功\", savedUser);\n");
         content.append("    }\n\n");
         
@@ -372,26 +379,26 @@ public class JwtGenerator {
         StringBuilder content = new StringBuilder();
         content.append("package ").append(generatorConfig.getServicePackage()).append(";\n\n");
         
-        content.append("import ").append(generatorConfig.getEntityPackage()).append(".User;\n");
-        content.append("import ").append(generatorConfig.getRepositoryPackage()).append(".UserRepository;\n");
+        content.append("import ").append(generatorConfig.getEntityPackage()).append(".").append(getUserEntityName()).append(";\n");
+        content.append("import ").append(generatorConfig.getRepositoryPackage()).append(".").append(getUserEntityName()).append("Repository;\n");
         content.append("import org.springframework.beans.factory.annotation.Autowired;\n");
         content.append("import org.springframework.security.core.authority.SimpleGrantedAuthority;\n");
         content.append("import org.springframework.security.core.userdetails.UserDetails;\n");
         content.append("import org.springframework.security.core.userdetails.UserDetailsService;\n");
         content.append("import org.springframework.security.core.userdetails.UsernameNotFoundException;\n");
         content.append("import org.springframework.stereotype.Service;\n\n");
-        
+
         content.append("import java.util.Collections;\n\n");
-        
+
         content.append("@Service\n");
         content.append("public class CustomUserDetailsService implements UserDetailsService {\n\n");
-        
+
         content.append("    @Autowired\n");
-        content.append("    private UserRepository userRepository;\n\n");
-        
+        content.append("    private ").append(getUserEntityName()).append("Repository userRepository;\n\n");
+
         content.append("    @Override\n");
         content.append("    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {\n");
-        content.append("        User user = userRepository.findByUsername(username)\n");
+        content.append("        ").append(getUserEntityName()).append(" user = userRepository.findByUsername(username)\n");
         content.append("                .orElseThrow(() -> new UsernameNotFoundException(\"用户不存在: \" + username));\n\n");
         
         content.append("        return new org.springframework.security.core.userdetails.User(\n");

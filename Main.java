@@ -90,7 +90,7 @@ public class Main {
             System.out.println("✓ pom.xml 检查完成");
             
             System.out.println("\n正在生成 JWT 相关代码...");
-            JwtGenerator jwtGenerator = new JwtGenerator(generatorConfig, jwtConfig);
+            JwtGenerator jwtGenerator = new JwtGenerator(generatorConfig, jwtConfig, authConfig);
             jwtGenerator.generateJwtUtils();
             jwtGenerator.generateJwtAuthenticationFilter();
             jwtGenerator.generateSecurityConfig();
