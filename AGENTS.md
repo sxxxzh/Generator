@@ -108,7 +108,7 @@ JWT 配置（密钥对、过期时间）已从 `application.yml` 迁移到各环
 ## 特殊表：`user`
 
 如果存在 `user` 表，则：
-- Repository 会额外生成 `findByUsername()` 方法
+- Repository 会额外生成按登录字段查询的方法（默认是 `findByUsername()`，可随 `AuthConfig.usernameField` 变化）
 - Controller 的 update 方法会校验当前用户只能修改自己的信息（除非是 ADMIN）
 
 ## 用户所有权表

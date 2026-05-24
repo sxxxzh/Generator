@@ -32,6 +32,8 @@ public class Main {
         System.out.println("  - 数据库: " + dbConfig.getName());
         System.out.println("代码生成配置:");
         System.out.println("  - 基硌包: " + generatorConfig.getBasePackage());
+        System.out.println("  - 后端输出目录: " + generatorConfig.getOutputPath());
+        System.out.println("  - 前端输出目录: " + generatorConfig.getFrontendOutputPath());
         System.out.println("  - 使用 DTO: " + generatorConfig.isUseDTO() + (generatorConfig.isUseDTO() ? " (Controller 使用 DTO)" : " (Controller 使用 Entity)"));
         System.out.println("  - 排除字段: " + generatorConfig.getExcludedFields());
         System.out.println("  - 选择表: " + (generatorConfig.getSelectedTables().isEmpty() ? "全部" : generatorConfig.getSelectedTables()));
@@ -39,6 +41,8 @@ public class Main {
         System.out.println("  - API 路径: " + generatorConfig.getApiPath());
         System.out.println("权限验证配置:");
         System.out.println("  - 表名: " + authConfig.getTableName());
+        System.out.println("  - 用户名字段: " + authConfig.getUsernameField());
+        System.out.println("  - 密码字段: " + authConfig.getPasswordField());
         System.out.println("  - 角色字段: " + authConfig.getRoleField());
         System.out.println("  - 角色等级: " + authConfig.getRoleAdmin() + " > " + authConfig.getRoleUser() + " > " + authConfig.getRoleGuest());
         System.out.println("  - 全表权限验证: " + authConfig.isEnableAllTableAuth());
@@ -90,7 +94,7 @@ public class Main {
             System.out.println("✓ pom.xml 检查完成");
             
             System.out.println("\n正在生成 JWT 相关代码...");
-            JwtGenerator jwtGenerator = new JwtGenerator(generatorConfig, jwtConfig, authConfig);
+            JwtGenerator jwtGenerator = new JwtGenerator(generatorConfig, jwtConfig, authConfig, tables);
             jwtGenerator.generateJwtUtils();
             jwtGenerator.generateJwtAuthenticationFilter();
             jwtGenerator.generateSecurityConfig();
@@ -141,10 +145,6 @@ public class Main {
         content.append("    version: 1.0.0\n");
         content.append("  profiles:\n");
         content.append("    active: dev\n");
-        content.append("  web:\n");
-        content.append("    resources:\n");
-        content.append("      static-locations: classpath:/static/\n");
-        content.append("      add-mappings: true\n");
         return content.toString();
     }
 

@@ -7,6 +7,7 @@ import Generator.model.TableInfo;
 import Generator.model.ColumnInfo;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 public class WebTemplateGenerator {
@@ -22,10 +23,11 @@ public class WebTemplateGenerator {
 
     public void generateAll(List<TableInfo> tables) throws IOException {
         generateCss();
+        generateAppJs();
         generateApiJs();
         generateAuthJs();
         generateToastJs();
-        generateTableJs(tables);
+        generateTableJs();
         generateIndexHtml(tables);
         generateLoginHtml();
         generateRegisterHtml();
@@ -37,8 +39,16 @@ public class WebTemplateGenerator {
         System.out.println("  Web 模板生成完成");
     }
 
-    private String getStaticPath(String subPath) {
-        return generatorConfig.getOutputPath() + "/static/" + subPath;
+    private String getFrontendRootPath() {
+        return generatorConfig.getFrontendOutputPath();
+    }
+
+    private String getAssetPath(String subPath) {
+        return getFrontendRootPath() + "/assets/" + subPath;
+    }
+
+    private String getPagePath(String pageName) {
+        return getFrontendRootPath() + "/pages/" + pageName;
     }
 
     // ==================== CSS ====================
@@ -140,7 +150,28 @@ public class WebTemplateGenerator {
         c.append("    .form-container{margin:20px;padding:20px}\n");
         c.append("}\n");
 
-        Generator.util.FileUtils.writeToFile(getStaticPath("css/style.css"), c.toString());
+        Generator.util.FileUtils.writeToFile(getAssetPath("css/style.css"), c.toString());
+    }
+
+    // ==================== JS: app.js ====================
+
+    private void generateAppJs() throws IOException {
+        StringBuilder j = new StringBuilder();
+        j.append("function getAppBasePath(){\n");
+        j.append("    const path=window.location.pathname.replace(/\\\\/g,'/');\n");
+        j.append("    const pagesIdx=path.indexOf('/pages/');\n");
+        j.append("    if(pagesIdx>=0) return path.substring(0,pagesIdx);\n");
+        j.append("    const slashIdx=path.lastIndexOf('/');\n");
+        j.append("    return slashIdx>=0?path.substring(0,slashIdx):'';\n");
+        j.append("}\n\n");
+        j.append("function homeUrl(){\n");
+        j.append("    return getAppBasePath()+'/index.html';\n");
+        j.append("}\n\n");
+        j.append("function pageUrl(page){\n");
+        j.append("    return getAppBasePath()+'/pages/'+page;\n");
+        j.append("}\n");
+
+        Generator.util.FileUtils.writeToFile(getAssetPath("js/app.js"), j.toString());
     }
 
     // ==================== JS: api.js ====================
@@ -159,7 +190,7 @@ public class WebTemplateGenerator {
         j.append("    const opt={method,headers:getHeaders()};\n");
         j.append("    if(data&&method!=='GET') opt.body=JSON.stringify(data);\n");
         j.append("    const res=await fetch(API_BASE+url,opt);\n");
-        j.append("    if(res.status===401){localStorage.clear();window.location.href='login.html';return}\n");
+        j.append("    if(res.status===401){localStorage.clear();window.location.href=pageUrl('login.html');return}\n");
         j.append("    if(!res.ok) throw new Error('Request failed: '+res.status);\n");
         j.append("    return await res.json();\n");
         j.append("}\n\n");
@@ -168,7 +199,7 @@ public class WebTemplateGenerator {
         j.append("async function apiPut(url,data){return await apiRequest(url,'PUT',data)}\n");
         j.append("async function apiDelete(url){return await apiRequest(url,'DELETE')}\n");
 
-        Generator.util.FileUtils.writeToFile(getStaticPath("js/api.js"), j.toString());
+        Generator.util.FileUtils.writeToFile(getAssetPath("js/api.js"), j.toString());
     }
 
     // ==================== JS: auth.js ====================
@@ -185,7 +216,7 @@ public class WebTemplateGenerator {
         j.append("}\n\n");
         j.append("function logout(){\n");
         j.append("    localStorage.clear();\n");
-        j.append("    window.location.href='login.html';\n");
+        j.append("    window.location.href=pageUrl('login.html');\n");
         j.append("}\n\n");
         j.append("function isLoggedIn(){\n");
         j.append("    return !!localStorage.getItem('token')\n");
@@ -202,7 +233,7 @@ public class WebTemplateGenerator {
         j.append("    }\n");
         j.append("}\n");
 
-        Generator.util.FileUtils.writeToFile(getStaticPath("js/auth.js"), j.toString());
+        Generator.util.FileUtils.writeToFile(getAssetPath("js/auth.js"), j.toString());
     }
 
     // ==================== JS: toast.js ====================
@@ -221,16 +252,17 @@ public class WebTemplateGenerator {
         j.append("    setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity .3s';setTimeout(()=>el.remove(),300)},3000);\n");
         j.append("}\n");
 
-        Generator.util.FileUtils.writeToFile(getStaticPath("js/toast.js"), j.toString());
+        Generator.util.FileUtils.writeToFile(getAssetPath("js/toast.js"), j.toString());
     }
 
     // ==================== JS: table.js ====================
 
-    private void generateTableJs(List<TableInfo> tables) throws IOException {
+    private void generateTableJs() throws IOException {
         StringBuilder j = new StringBuilder();
         j.append("class TableManager{\n");
         j.append("    constructor(cfg){\n");
         j.append("        this.apiUrl=cfg.apiUrl;\n");
+        j.append("        this.idField=cfg.idField||'id';\n");
         j.append("        this.columns=cfg.columns;\n");
         j.append("        this.labels=cfg.labels||{};\n");
         j.append("        this.page=0;\n");
@@ -253,19 +285,46 @@ public class WebTemplateGenerator {
         j.append("        tbody.innerHTML='';\n");
         j.append("        data.forEach(item=>{\n");
         j.append("            const tr=document.createElement('tr');\n");
-        j.append("            this.columns.forEach(col=>{tr.innerHTML+='<td>'+(item[col]??'')+'</td>'});\n");
+        j.append("            this.columns.forEach(col=>{\n");
+        j.append("                const td=document.createElement('td');\n");
+        j.append("                td.textContent=item[col]??'';\n");
+        j.append("                tr.appendChild(td);\n");
+        j.append("            });\n");
         j.append("            const td=document.createElement('td');td.className='actions';\n");
-        j.append("            td.innerHTML='<button class=\"btn btn-sm\" onclick=\"table&&table.editItem('+item.id+')\">编辑</button><button class=\"btn btn-sm btn-danger\" onclick=\"table&&table.deleteItem('+item.id+')\">删除</button>';\n");
+        j.append("            const editBtn=document.createElement('button');\n");
+        j.append("            editBtn.className='btn btn-sm';\n");
+        j.append("            editBtn.textContent='编辑';\n");
+        j.append("            editBtn.addEventListener('click',()=>this.editItem(item[this.idField]));\n");
+        j.append("            const deleteBtn=document.createElement('button');\n");
+        j.append("            deleteBtn.className='btn btn-sm btn-danger';\n");
+        j.append("            deleteBtn.textContent='删除';\n");
+        j.append("            deleteBtn.addEventListener('click',()=>this.deleteItem(item[this.idField]));\n");
+        j.append("            td.appendChild(editBtn);\n");
+        j.append("            td.appendChild(deleteBtn);\n");
         j.append("            tr.appendChild(td);tbody.appendChild(tr);\n");
         j.append("        });\n");
         j.append("    }\n\n");
         j.append("    renderPagination(){\n");
         j.append("        const p=document.getElementById('pagination');\n");
         j.append("        if(this.totalPages<=1){p.innerHTML='';return}\n");
-        j.append("        let h='<button '+(this.page===0?'disabled':'')+' onclick=\"table.goPage('+(this.page-1)+')\">‹</button>';\n");
-        j.append("        for(let i=0;i<this.totalPages;i++) h+='<button class=\"'+(i===this.page?'active':'')+'\" onclick=\"table.goPage('+i+')\">'+(i+1)+'</button>';\n");
-        j.append("        h+='<button '+(this.page>=this.totalPages-1?'disabled':'')+' onclick=\"table.goPage('+(this.page+1)+')\">›</button>';\n");
-        j.append("        p.innerHTML=h;\n");
+        j.append("        p.innerHTML='';\n");
+        j.append("        const prevBtn=document.createElement('button');\n");
+        j.append("        prevBtn.textContent='‹';\n");
+        j.append("        prevBtn.disabled=this.page===0;\n");
+        j.append("        prevBtn.addEventListener('click',()=>this.goPage(this.page-1));\n");
+        j.append("        p.appendChild(prevBtn);\n");
+        j.append("        for(let i=0;i<this.totalPages;i++){\n");
+        j.append("            const btn=document.createElement('button');\n");
+        j.append("            btn.textContent=String(i+1);\n");
+        j.append("            if(i===this.page) btn.className='active';\n");
+        j.append("            btn.addEventListener('click',()=>this.goPage(i));\n");
+        j.append("            p.appendChild(btn);\n");
+        j.append("        }\n");
+        j.append("        const nextBtn=document.createElement('button');\n");
+        j.append("        nextBtn.textContent='›';\n");
+        j.append("        nextBtn.disabled=this.page>=this.totalPages-1;\n");
+        j.append("        nextBtn.addEventListener('click',()=>this.goPage(this.page+1));\n");
+        j.append("        p.appendChild(nextBtn);\n");
         j.append("    }\n\n");
         j.append("    goPage(n){this.page=n;this.loadData()}\n\n");
         j.append("    search(){\n");
@@ -285,7 +344,9 @@ public class WebTemplateGenerator {
         j.append("    }\n\n");
         j.append("    openModal(data=null){\n");
         j.append("        document.getElementById('modalTitle').textContent=data?'编辑':'添加';\n");
+        j.append("        const idInput=document.getElementById('f_'+this.idField);\n");
         j.append("        if(data){\n");
+        j.append("            if(idInput) idInput.value=data[this.idField]??'';\n");
         j.append("            this.columns.forEach(c=>{\n");
         j.append("                const el=document.getElementById('f_'+c);\n");
         j.append("                if(el){\n");
@@ -295,6 +356,7 @@ public class WebTemplateGenerator {
         j.append("            });\n");
         j.append("        }else{\n");
         j.append("            document.getElementById('dataForm').reset();\n");
+        j.append("            if(idInput) idInput.value='';\n");
         j.append("        }\n");
         j.append("        document.getElementById('modalOverlay').classList.add('show');\n");
         j.append("    }\n\n");
@@ -304,6 +366,8 @@ public class WebTemplateGenerator {
         j.append("    async handleSubmit(e){\n");
         j.append("        e.preventDefault();\n");
         j.append("        const data={};\n");
+        j.append("        const idInput=document.getElementById('f_'+this.idField);\n");
+        j.append("        if(idInput&&idInput.value!=='') data[this.idField]=idInput.value;\n");
         j.append("        this.columns.forEach(c=>{\n");
         j.append("            const el=document.getElementById('f_'+c);\n");
         j.append("            if(el){\n");
@@ -311,7 +375,7 @@ public class WebTemplateGenerator {
         j.append("                else if(el.value!=='') data[c]=el.value;\n");
         j.append("            }\n");
         j.append("        });\n");
-        j.append("        const id=data.id;\n");
+        j.append("        const id=data[this.idField];\n");
         j.append("        try{\n");
         j.append("            const r=id?await apiPut(this.apiUrl+'/'+id,data):await apiPost(this.apiUrl,data);\n");
         j.append("            if(r.code===200){this.closeModal();this.loadData();showToast(id?'更新成功':'创建成功','success')}\n");
@@ -337,19 +401,21 @@ public class WebTemplateGenerator {
         j.append("    checkAuth();\n");
         j.append("    const tbl=document.getElementById('dataTable');\n");
         j.append("    if(!tbl) return;\n");
+        j.append("    const idField=tbl.dataset.idField||'id';\n");
         j.append("    const cols=JSON.parse(tbl.dataset.columns||'[]');\n");
         j.append("    const labels=JSON.parse(tbl.dataset.labels||'{}');\n");
-        j.append("    table=new TableManager({apiUrl:tbl.dataset.api,columns:cols,labels:labels});\n");
+        j.append("    table=new TableManager({apiUrl:tbl.dataset.api,idField:idField,columns:cols,labels:labels});\n");
         j.append("    document.getElementById('addBtn').addEventListener('click',()=>table.openModal());\n");
         j.append("    document.getElementById('refreshBtn').addEventListener('click',()=>{table.page=0;table.loadData()});\n");
         j.append("    document.getElementById('dataForm').addEventListener('submit',e=>table.handleSubmit(e));\n");
         j.append("    document.getElementById('searchBtn').addEventListener('click',()=>table.search());\n");
         j.append("    document.getElementById('searchInput').addEventListener('keydown',e=>{if(e.key==='Enter')table.search()});\n");
         j.append("    document.querySelector('.modal .close').addEventListener('click',()=>table.closeModal());\n");
+        j.append("    document.getElementById('cancelBtn').addEventListener('click',()=>table.closeModal());\n");
         j.append("    document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this)table.closeModal()});\n");
         j.append("});\n");
 
-        Generator.util.FileUtils.writeToFile(getStaticPath("js/table.js"), j.toString());
+        Generator.util.FileUtils.writeToFile(getAssetPath("js/table.js"), j.toString());
     }
 
     // ==================== HTML: index.html ====================
@@ -358,13 +424,13 @@ public class WebTemplateGenerator {
         StringBuilder h = new StringBuilder();
         h.append("<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n");
         h.append("<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">\n");
-        h.append("<title>管理系统</title>\n<link rel=\"stylesheet\" href=\"css/style.css\">\n</head>\n<body>\n");
+        h.append("<title>管理系统</title>\n<link rel=\"stylesheet\" href=\"assets/css/style.css\">\n</head>\n<body>\n");
         h.append("<nav class=\"navbar\"><h1>管理系统</h1><div class=\"nav-links\">");
-        h.append("<a href=\"index.html\">首页</a><a href=\"login.html\">登录</a><a href=\"register.html\">注册</a>");
+        h.append("<a href=\"index.html\">首页</a><a href=\"pages/login.html\">登录</a><a href=\"pages/register.html\">注册</a>");
         h.append("<span id=\"userInfo\"></span><button id=\"logoutBtn\">退出</button></div></nav>\n");
         h.append("<div class=\"container\"><div class=\"content\"><div class=\"welcome\"><h2>欢迎使用管理系统</h2>");
         h.append("<p>选择一个模块开始管理数据</p></div><div class=\"menu-grid\" id=\"menuList\"></div></div></div>\n");
-        h.append("<script src=\"js/api.js\"></script>\n<script src=\"js/auth.js\"></script>\n<script src=\"js/toast.js\"></script>\n<script>\n");
+        h.append("<script src=\"assets/js/app.js\"></script>\n<script src=\"assets/js/api.js\"></script>\n<script src=\"assets/js/auth.js\"></script>\n<script src=\"assets/js/toast.js\"></script>\n<script>\n");
         h.append("document.addEventListener('DOMContentLoaded',function(){checkAuth();\n");
         h.append("const menu=document.getElementById('menuList');\n");
         h.append("const tables=[");
@@ -372,16 +438,17 @@ public class WebTemplateGenerator {
             if (i > 0) h.append(",");
             String entityName = Generator.util.StringUtils.toCamelCase(tables.get(i).getTableName(), false);
             String tableName = tables.get(i).getTableName();
-            h.append("{name:'").append(tableName).append("',file:'").append(entityName).append("'}");
+            String title = getTableTitle(tables.get(i));
+            h.append("{name:'").append(escapeJs(title)).append("',file:'").append(entityName).append("'}");
         }
         h.append("];\n");
         h.append("tables.forEach(t=>{const a=document.createElement('a');\n");
-        h.append("a.href=t.file+'.html';a.className='menu-card';\n");
-        h.append("a.innerHTML='<span class=\"icon\">📊</span><span class=\"label\">'+t.name.replace(/_/g,' ').replace(/\\b\\w/g,c=>c.toUpperCase())+'</span>';\n");
+        h.append("a.href='pages/'+t.file+'.html';a.className='menu-card';\n");
+        h.append("a.innerHTML='<span class=\"icon\">📊</span><span class=\"label\">'+t.name+'</span>';\n");
         h.append("menu.appendChild(a);});\n");
         h.append("});\n</script>\n</body>\n</html>\n");
 
-        Generator.util.FileUtils.writeToFile(getStaticPath("index.html"), h.toString());
+        Generator.util.FileUtils.writeToFile(getFrontendRootPath() + "/index.html", h.toString());
     }
 
     // ==================== HTML: login.html ====================
@@ -390,21 +457,21 @@ public class WebTemplateGenerator {
         StringBuilder h = new StringBuilder();
         h.append("<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n");
         h.append("<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">\n");
-        h.append("<title>登录</title>\n<link rel=\"stylesheet\" href=\"css/style.css\">\n</head>\n<body>\n");
+        h.append("<title>登录</title>\n<link rel=\"stylesheet\" href=\"../assets/css/style.css\">\n</head>\n<body>\n");
         h.append("<div class=\"container\"><div class=\"form-container\"><h2>登录</h2>\n");
         h.append("<form id=\"loginForm\">\n");
         h.append("<div class=\"form-group\"><label for=\"username\">用户名</label><input type=\"text\" id=\"username\" required></div>\n");
         h.append("<div class=\"form-group\"><label for=\"password\">密码</label><input type=\"password\" id=\"password\" required></div>\n");
         h.append("<button type=\"submit\" class=\"btn btn-block\">登录</button>\n</form>\n");
         h.append("<p style=\"text-align:center;margin-top:16px;font-size:14px\">还没有账号？<a href=\"register.html\">注册</a></p></div></div>\n");
-        h.append("<script src=\"js/api.js\"></script>\n<script src=\"js/auth.js\"></script>\n<script src=\"js/toast.js\"></script>\n<script>\n");
+        h.append("<script src=\"../assets/js/app.js\"></script>\n<script src=\"../assets/js/api.js\"></script>\n<script src=\"../assets/js/auth.js\"></script>\n<script src=\"../assets/js/toast.js\"></script>\n<script>\n");
         h.append("document.getElementById('loginForm').addEventListener('submit',async function(e){\n");
         h.append("e.preventDefault();const u=document.getElementById('username').value;const p=document.getElementById('password').value;\n");
-        h.append("try{const r=await login(u,p);if(r.code===200){showToast('登录成功','success');setTimeout(()=>window.location.href='index.html',800)}");
+        h.append("try{const r=await login(u,p);if(r.code===200){showToast('登录成功','success');setTimeout(()=>window.location.href=homeUrl(),800)}");
         h.append("else showToast(r.message,'error')}catch(err){showToast('登录失败: '+err.message,'error')}\n");
         h.append("});\n</script>\n</body>\n</html>\n");
 
-        Generator.util.FileUtils.writeToFile(getStaticPath("login.html"), h.toString());
+        Generator.util.FileUtils.writeToFile(getPagePath("login.html"), h.toString());
     }
 
     // ==================== HTML: register.html ====================
@@ -413,23 +480,25 @@ public class WebTemplateGenerator {
         StringBuilder h = new StringBuilder();
         h.append("<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n");
         h.append("<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">\n");
-        h.append("<title>注册</title>\n<link rel=\"stylesheet\" href=\"css/style.css\">\n</head>\n<body>\n");
+        h.append("<title>注册</title>\n<link rel=\"stylesheet\" href=\"../assets/css/style.css\">\n</head>\n<body>\n");
         h.append("<div class=\"container\"><div class=\"form-container\"><h2>注册</h2>\n");
         h.append("<form id=\"registerForm\">\n");
         h.append("<div class=\"form-group\"><label for=\"username\">用户名</label><input type=\"text\" id=\"username\" required></div>\n");
         h.append("<div class=\"form-group\"><label for=\"password\">密码</label><input type=\"password\" id=\"password\" required></div>\n");
-        h.append("<div class=\"form-group\"><label for=\"role\">角色</label><select id=\"role\"><option value=\"USER\">用户</option><option value=\"ADMIN\">管理员</option></select></div>\n");
+        h.append("<div class=\"form-group\"><label for=\"role\">角色</label><select id=\"role\"><option value=\"")
+                .append(escapeHtmlAttribute(authConfig.getRoleUser())).append("\">用户</option><option value=\"")
+                .append(escapeHtmlAttribute(authConfig.getRoleAdmin())).append("\">管理员</option></select></div>\n");
         h.append("<button type=\"submit\" class=\"btn btn-block\">注册</button>\n</form>\n");
         h.append("<p style=\"text-align:center;margin-top:16px;font-size:14px\">已有账号？<a href=\"login.html\">登录</a></p></div></div>\n");
-        h.append("<script src=\"js/api.js\"></script>\n<script src=\"js/auth.js\"></script>\n<script src=\"js/toast.js\"></script>\n<script>\n");
+        h.append("<script src=\"../assets/js/app.js\"></script>\n<script src=\"../assets/js/api.js\"></script>\n<script src=\"../assets/js/auth.js\"></script>\n<script src=\"../assets/js/toast.js\"></script>\n<script>\n");
         h.append("document.getElementById('registerForm').addEventListener('submit',async function(e){\n");
         h.append("e.preventDefault();const u=document.getElementById('username').value;const p=document.getElementById('password').value;");
         h.append("const rl=document.getElementById('role').value;\n");
-        h.append("try{const r=await register(u,p,rl);if(r.code===200){showToast('注册成功','success');setTimeout(()=>window.location.href='login.html',800)}");
+        h.append("try{const r=await register(u,p,rl);if(r.code===200){showToast('注册成功','success');setTimeout(()=>window.location.href=pageUrl('login.html'),800)}");
         h.append("else showToast(r.message,'error')}catch(err){showToast('注册失败: '+err.message,'error')}\n");
         h.append("});\n</script>\n</body>\n</html>\n");
 
-        Generator.util.FileUtils.writeToFile(getStaticPath("register.html"), h.toString());
+        Generator.util.FileUtils.writeToFile(getPagePath("register.html"), h.toString());
     }
 
     // ==================== HTML: {table}.html ====================
@@ -439,15 +508,28 @@ public class WebTemplateGenerator {
         String className = Generator.util.StringUtils.toCamelCase(tableName, true);
         String entityName = Generator.util.StringUtils.toCamelCase(tableName, false);
 
+        ColumnInfo idColumn = getPrimaryKeyColumn(table);
+        String idField = idColumn != null
+                ? Generator.util.StringUtils.toCamelCase(idColumn.getColumnName(), false)
+                : "id";
+
+        List<ColumnInfo> uiColumns = new ArrayList<>();
+        for (ColumnInfo col : table.getColumns()) {
+            if (col.isPrimaryKey() || isExcludedField(col) || isAutoFillField(col)) {
+                continue;
+            }
+            uiColumns.add(col);
+        }
+
         StringBuilder columnNames = new StringBuilder("[");
         StringBuilder columnLabels = new StringBuilder("{");
         boolean first = true;
-        for (ColumnInfo col : table.getColumns()) {
+        for (ColumnInfo col : uiColumns) {
             String fn = Generator.util.StringUtils.toCamelCase(col.getColumnName(), false);
             if (!first) { columnNames.append(","); columnLabels.append(","); }
             first = false;
             columnNames.append("\"").append(fn).append("\"");
-            columnLabels.append("\"").append(fn).append("\":\"").append(fn).append("\"");
+            columnLabels.append("\"").append(fn).append("\":\"").append(escapeJson(getColumnLabel(col))).append("\"");
         }
         columnNames.append("]");
         columnLabels.append("}");
@@ -455,18 +537,17 @@ public class WebTemplateGenerator {
         StringBuilder h = new StringBuilder();
         h.append("<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n");
         h.append("<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\">\n");
-        h.append("<title>").append(className).append(" 管理</title>\n<link rel=\"stylesheet\" href=\"css/style.css\">\n</head>\n<body>\n");
+        h.append("<title>").append(escapeHtml(getTableTitle(table))).append(" 管理</title>\n<link rel=\"stylesheet\" href=\"../assets/css/style.css\">\n</head>\n<body>\n");
         h.append("<nav class=\"navbar\"><h1>").append(className).append(" 管理</h1><div class=\"nav-links\">");
-        h.append("<a href=\"index.html\">首页</a><span id=\"userInfo\"></span><button id=\"logoutBtn\">退出</button></div></nav>\n");
+        h.append("<a href=\"../index.html\">首页</a><span id=\"userInfo\"></span><button id=\"logoutBtn\">退出</button></div></nav>\n");
         h.append("<div class=\"container\"><div class=\"content\">\n");
         h.append("<div class=\"toolbar\"><div class=\"toolbar-left\">");
         h.append("<button id=\"addBtn\" class=\"btn\">+ 添加</button><button id=\"refreshBtn\" class=\"btn btn-outline\">刷新</button></div>");
-        h.append("<div class=\"search-box\"><input type=\"text\" id=\"searchInput\" placeholder=\"搜索...\"><button id=\"searchBtn\" class=\"btn\">搜索</button></div></div>\n");
-        h.append("<div class=\"table-wrap\">\n<table id=\"dataTable\" class=\"data-table\" data-api=\"/").append(entityName).append("\" data-columns='").append(columnNames).append("' data-labels='").append(columnLabels).append("'>\n");
+        h.append("<div class=\"search-box\"><input type=\"text\" id=\"searchInput\" placeholder=\"按关键字段搜索...\"><button id=\"searchBtn\" class=\"btn\">搜索</button></div></div>\n");
+        h.append("<div class=\"table-wrap\">\n<table id=\"dataTable\" class=\"data-table\" data-api=\"/").append(entityName).append("\" data-id-field=\"").append(idField).append("\" data-columns='").append(columnNames).append("' data-labels='").append(columnLabels).append("'>\n");
         h.append("<thead><tr>\n");
-        for (ColumnInfo col : table.getColumns()) {
-            String fn = Generator.util.StringUtils.toCamelCase(col.getColumnName(), false);
-            h.append("<th>").append(fn).append("</th>\n");
+        for (ColumnInfo col : uiColumns) {
+            h.append("<th>").append(escapeHtml(getColumnLabel(col))).append("</th>\n");
         }
         h.append("<th>操作</th></tr></thead>\n<tbody id=\"tableBody\"></tbody>\n</table>\n</div>\n");
         h.append("<div id=\"pagination\" class=\"pagination\"></div>\n</div></div>\n\n");
@@ -474,25 +555,26 @@ public class WebTemplateGenerator {
         h.append("<div id=\"modalOverlay\" class=\"modal-overlay\"><div class=\"modal\">");
         h.append("<button class=\"close\">&times;</button><h3 id=\"modalTitle\">添加</h3>\n");
         h.append("<form id=\"dataForm\">\n");
-        for (ColumnInfo col : table.getColumns()) {
+        h.append("<input type=\"hidden\" id=\"f_").append(idField).append("\">\n");
+        for (ColumnInfo col : uiColumns) {
             String fn = Generator.util.StringUtils.toCamelCase(col.getColumnName(), false);
             String type = getHtmlInputType(col.getColumnType());
-            if (col.isPrimaryKey()) {
-                h.append("<input type=\"hidden\" id=\"f_").append(fn).append("\">\n");
-            } else {
-                h.append("<div class=\"form-group\"><label for=\"f_").append(fn).append("\">").append(fn).append("</label>");
-                h.append("<input type=\"").append(type).append("\" id=\"f_").append(fn).append("\"></div>\n");
+            h.append("<div class=\"form-group\"><label for=\"f_").append(fn).append("\">").append(escapeHtml(getColumnLabel(col))).append("</label>");
+            h.append("<input type=\"").append(type).append("\" id=\"f_").append(fn).append("\"");
+            if (!col.isNullable()) {
+                h.append(" required");
             }
+            h.append("></div>\n");
         }
         h.append("<div class=\"form-actions\">");
-        h.append("<button type=\"button\" class=\"btn btn-outline\" onclick=\"table&&table.closeModal()\">取消</button>");
+        h.append("<button type=\"button\" id=\"cancelBtn\" class=\"btn btn-outline\">取消</button>");
         h.append("<button type=\"submit\" class=\"btn\">保存</button></div>\n");
         h.append("</form></div></div>\n\n");
 
-        h.append("<script src=\"js/api.js\"></script>\n<script src=\"js/auth.js\"></script>\n");
-        h.append("<script src=\"js/toast.js\"></script>\n<script src=\"js/table.js\"></script>\n</body>\n</html>\n");
+        h.append("<script src=\"../assets/js/app.js\"></script>\n<script src=\"../assets/js/api.js\"></script>\n<script src=\"../assets/js/auth.js\"></script>\n");
+        h.append("<script src=\"../assets/js/toast.js\"></script>\n<script src=\"../assets/js/table.js\"></script>\n</body>\n</html>\n");
 
-        Generator.util.FileUtils.writeToFile(getStaticPath(entityName + ".html"), h.toString());
+        Generator.util.FileUtils.writeToFile(getPagePath(entityName + ".html"), h.toString());
     }
 
     private String getHtmlInputType(String columnType) {
@@ -505,5 +587,88 @@ public class WebTemplateGenerator {
             case "BOOLEAN": case "BIT": return "checkbox";
             default: return "text";
         }
+    }
+
+    private ColumnInfo getPrimaryKeyColumn(TableInfo table) {
+        for (ColumnInfo column : table.getColumns()) {
+            if (column.isPrimaryKey()) {
+                return column;
+            }
+        }
+        return null;
+    }
+
+    private boolean isExcludedField(ColumnInfo column) {
+        String fieldName = Generator.util.StringUtils.toCamelCase(column.getColumnName(), false);
+        return generatorConfig.getExcludedFields().contains(fieldName)
+                || generatorConfig.getExcludedFields().contains(column.getColumnName());
+    }
+
+    private boolean isAutoFillField(ColumnInfo column) {
+        String type = column.getColumnType().toUpperCase();
+        if (!"DATETIME".equals(type) && !"TIMESTAMP".equals(type) && !"DATE".equals(type)) {
+            return false;
+        }
+        String name = column.getColumnName().toLowerCase();
+        return name.startsWith("create_") || name.startsWith("created_")
+                || name.startsWith("update_") || name.startsWith("updated_");
+    }
+
+    private String getColumnLabel(ColumnInfo column) {
+        if (column.getComment() != null && !column.getComment().trim().isEmpty()) {
+            return column.getComment().trim();
+        }
+        return formatName(column.getColumnName());
+    }
+
+    private String getTableTitle(TableInfo table) {
+        if (table.getTableComment() != null && !table.getTableComment().trim().isEmpty()) {
+            return table.getTableComment().trim();
+        }
+        return formatName(table.getTableName());
+    }
+
+    private String formatName(String rawName) {
+        String[] parts = rawName.split("_");
+        StringBuilder result = new StringBuilder();
+        for (String part : parts) {
+            if (part.isEmpty()) {
+                continue;
+            }
+            if (result.length() > 0) {
+                result.append(" ");
+            }
+            result.append(Character.toUpperCase(part.charAt(0)));
+            if (part.length() > 1) {
+                result.append(part.substring(1).toLowerCase());
+            }
+        }
+        return result.toString();
+    }
+
+    private String escapeHtml(String value) {
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
+    }
+
+    private String escapeHtmlAttribute(String value) {
+        return escapeHtml(value);
+    }
+
+    private String escapeJs(String value) {
+        return value
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\"", "\\\"");
+    }
+
+    private String escapeJson(String value) {
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"");
     }
 }

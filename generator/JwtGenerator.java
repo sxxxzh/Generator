@@ -3,23 +3,185 @@ package Generator.generator;
 import Generator.config.AuthConfig;
 import Generator.config.GeneratorConfig;
 import Generator.config.JwtConfig;
+import Generator.model.ColumnInfo;
+import Generator.model.TableInfo;
 import Generator.util.FileUtils;
+import Generator.util.TypeUtils;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 public class JwtGenerator {
     private final GeneratorConfig generatorConfig;
     private final JwtConfig jwtConfig;
     private final AuthConfig authConfig;
+    private final String roleFieldJavaType;
+    private final List<ColumnInfo> nonNullDefaultFields;
 
-    public JwtGenerator(GeneratorConfig generatorConfig, JwtConfig jwtConfig, AuthConfig authConfig) {
+    public JwtGenerator(GeneratorConfig generatorConfig, JwtConfig jwtConfig, AuthConfig authConfig, List<TableInfo> tables) {
         this.generatorConfig = generatorConfig;
         this.jwtConfig = jwtConfig;
         this.authConfig = authConfig;
+        this.roleFieldJavaType = resolveFieldJavaType(tables, authConfig.getTableName(), authConfig.getRoleField(), "String");
+        validateConfiguredRoleValues();
+        this.nonNullDefaultFields = computeNonNullDefaultFields(tables);
     }
 
     private String getUserEntityName() {
         return Generator.util.StringUtils.toCamelCase(authConfig.getTableName(), true);
+    }
+
+    private String getUserFieldGetter(String fieldName) {
+        return "get" + Generator.util.StringUtils.toCamelCase(fieldName, true);
+    }
+
+    private String getUserFieldSetter(String fieldName) {
+        return "set" + Generator.util.StringUtils.toCamelCase(fieldName, true);
+    }
+
+    private String getFindByUsernameMethodName() {
+        return "findBy" + Generator.util.StringUtils.toCamelCase(authConfig.getUsernameField(), true);
+    }
+
+    private String resolveFieldJavaType(List<TableInfo> tables, String tableName, String fieldName, String defaultType) {
+        for (TableInfo table : tables) {
+            if (!table.getTableName().equalsIgnoreCase(tableName)) {
+                continue;
+            }
+            for (ColumnInfo column : table.getColumns()) {
+                if (column.getColumnName().equalsIgnoreCase(fieldName)) {
+                    return TypeUtils.mapJavaType(column.getColumnType());
+                }
+            }
+        }
+        return defaultType;
+    }
+
+    private String convertStringExpressionToRoleType(String expression) {
+        return switch (roleFieldJavaType) {
+            case "Byte" -> "Byte.valueOf(" + expression + ")";
+            case "Short" -> "Short.valueOf(" + expression + ")";
+            case "Integer" -> "Integer.valueOf(" + expression + ")";
+            case "Long" -> "Long.valueOf(" + expression + ")";
+            case "Float" -> "Float.valueOf(" + expression + ")";
+            case "Double" -> "Double.valueOf(" + expression + ")";
+            case "java.math.BigDecimal" -> "new java.math.BigDecimal(" + expression + ")";
+            case "Boolean" -> "Boolean.valueOf(" + expression + ")";
+            default -> expression;
+        };
+    }
+
+    private String getRoleDefaultLiteral() {
+        String value = authConfig.getRoleUser();
+        return switch (roleFieldJavaType) {
+            case "Byte" -> "(byte) " + Byte.valueOf(value);
+            case "Short" -> "(short) " + Short.valueOf(value);
+            case "Integer" -> Integer.valueOf(value).toString();
+            case "Long" -> Long.valueOf(value) + "L";
+            case "Float" -> Float.valueOf(value) + "f";
+            case "Double" -> Double.valueOf(value).toString();
+            case "java.math.BigDecimal" -> "new java.math.BigDecimal(\"" + value + "\")";
+            case "Boolean" -> Boolean.valueOf(value).toString();
+            default -> "\"" + escapeJava(value) + "\"";
+        };
+    }
+
+    private boolean isAutoFillField(ColumnInfo column) {
+        String type = column.getColumnType().toUpperCase();
+        if (!"DATETIME".equals(type) && !"TIMESTAMP".equals(type) && !"DATE".equals(type)) {
+            return false;
+        }
+        String name = column.getColumnName().toLowerCase();
+        return name.startsWith("create_") || name.startsWith("created_")
+            || name.startsWith("update_") || name.startsWith("updated_");
+    }
+
+    private String getDefaultLiteralForType(String javaType) {
+        return switch (javaType) {
+            case "Byte" -> "(byte) 1";
+            case "Short" -> "(short) 1";
+            case "Integer" -> "1";
+            case "Long" -> "1L";
+            case "Float" -> "1.0f";
+            case "Double" -> "1.0";
+            case "java.math.BigDecimal" -> "java.math.BigDecimal.ZERO";
+            case "Boolean" -> "true";
+            case "String" -> "\"\"";
+            case "java.time.LocalDate" -> "java.time.LocalDate.now()";
+            case "java.time.LocalTime" -> "java.time.LocalTime.now()";
+            case "java.time.LocalDateTime" -> "java.time.LocalDateTime.now()";
+            default -> "null";
+        };
+    }
+
+    private List<ColumnInfo> computeNonNullDefaultFields(List<TableInfo> tables) {
+        List<ColumnInfo> result = new ArrayList<>();
+        for (TableInfo table : tables) {
+            if (!table.getTableName().equalsIgnoreCase(authConfig.getTableName())) {
+                continue;
+            }
+            for (ColumnInfo column : table.getColumns()) {
+                if (column.isPrimaryKey()) continue;
+                if (column.isNullable()) continue;
+                if (isAutoFillField(column)) continue;
+                if (column.getColumnName().equalsIgnoreCase(authConfig.getUsernameField())) continue;
+                if (column.getColumnName().equalsIgnoreCase(authConfig.getPasswordField())) continue;
+                if (column.getColumnName().equalsIgnoreCase(authConfig.getRoleField())) continue;
+                result.add(column);
+            }
+        }
+        return result;
+    }
+
+    private String escapeJava(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private void validateConfiguredRoleValues() {
+        if ("String".equals(roleFieldJavaType)) {
+            return;
+        }
+        if (!isCompatibleRoleValue(authConfig.getRoleAdmin())
+                || !isCompatibleRoleValue(authConfig.getRoleUser())
+                || !isCompatibleRoleValue(authConfig.getRoleGuest())) {
+            throw new IllegalArgumentException(
+                    "\n========================================\n"
+                    + " 配置错误: " + authConfig.getRoleField() + " 字段在数据库中类型为 " + roleFieldJavaType + "\n"
+                    + " 但 roleAdmin/roleUser/roleGuest 配置了非数值字符串，\n"
+                    + " 会导致运行时 NumberFormatException。\n"
+                    + " 请在 Main.main() 中将它们设置为实际数据库值：\n"
+                    + "   例如: authConfig.setRoleUser(\"1\");\n"
+                    + "         authConfig.setRoleAdmin(\"2\");\n"
+                    + "         authConfig.setRoleGuest(\"0\");\n"
+                    + "========================================"
+            );
+        }
+    }
+
+    private boolean isCompatibleRoleValue(String value) {
+        try {
+            switch (roleFieldJavaType) {
+                case "Byte" -> Byte.valueOf(value);
+                case "Short" -> Short.valueOf(value);
+                case "Integer" -> Integer.valueOf(value);
+                case "Long" -> Long.valueOf(value);
+                case "Float" -> Float.valueOf(value);
+                case "Double" -> Double.valueOf(value);
+                case "java.math.BigDecimal" -> new java.math.BigDecimal(value);
+                case "Boolean" -> {
+                    if (!"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value)) {
+                        return false;
+                    }
+                }
+                default -> {
+                    return true;
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
     
     public void generateJwtUtils() throws IOException {
@@ -238,9 +400,6 @@ public class JwtGenerator {
         content.append("                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))\n");
         content.append("                .authorizeHttpRequests(auth -> auth\n");
         content.append("                        .requestMatchers(\"").append(generatorConfig.getApiPath()).append("/auth/**\").permitAll()\n");
-        content.append("                        .requestMatchers(\"/\", \"/index.html\", \"/login.html\", \"/register.html\").permitAll()\n");
-        content.append("                        .requestMatchers(\"/css/**\", \"/js/**\", \"/images/**\").permitAll()\n");
-        content.append("                        .requestMatchers(\"/**/*.html\").permitAll()\n");
         content.append("                        .anyRequest().authenticated()\n");
         content.append("                )\n");
         content.append("                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);\n\n");
@@ -332,16 +491,28 @@ public class JwtGenerator {
         
         content.append("    @PostMapping(\"/register\")\n");
         content.append("    public ApiResponse<").append(getUserEntityName()).append("> register(@RequestBody RegisterRequest registerRequest) {\n");
-        content.append("        if (userRepository.findByUsername(registerRequest.getUsername()).isPresent()) {\n");
+        content.append("        if (userRepository.").append(getFindByUsernameMethodName()).append("(registerRequest.getUsername()).isPresent()) {\n");
         content.append("            return ApiResponse.error(400, \"用户名已存在\");\n");
         content.append("        }\n\n");
 
         content.append("        ").append(getUserEntityName()).append(" user = new ").append(getUserEntityName()).append("();\n");
-        content.append("        user.setUsername(registerRequest.getUsername());\n");
-        content.append("        user.setPassword(passwordEncoder.encode(registerRequest.getPassword()));\n");
-        content.append("        user.setRole(registerRequest.getRole() != null ? registerRequest.getRole() : \"USER\");\n\n");
-
-        content.append("        ").append(getUserEntityName()).append(" savedUser = userRepository.save(user);\n");
+        content.append("        user.").append(getUserFieldSetter(authConfig.getUsernameField())).append("(registerRequest.getUsername());\n");
+        content.append("        user.").append(getUserFieldSetter(authConfig.getPasswordField())).append("(passwordEncoder.encode(registerRequest.getPassword()));\n");
+        if (!"String".equals(roleFieldJavaType)) {
+            content.append("        user.").append(getUserFieldSetter(authConfig.getRoleField()))
+                    .append("(registerRequest.getRole() != null ? registerRequest.getRole() : ")
+                    .append(getRoleDefaultLiteral()).append(");\n\n");
+        } else {
+            String roleValueExpression = "registerRequest.getRole() != null ? registerRequest.getRole() : \"" + escapeJava(authConfig.getRoleUser()) + "\"";
+            content.append("        user.").append(getUserFieldSetter(authConfig.getRoleField())).append("(")
+                    .append(convertStringExpressionToRoleType(roleValueExpression)).append(");\n\n");
+        }
+        for (ColumnInfo col : nonNullDefaultFields) {
+            String javaType = TypeUtils.mapJavaType(col.getColumnType());
+            content.append("        user.").append(getUserFieldSetter(col.getColumnName()))
+                    .append("(").append(getDefaultLiteralForType(javaType)).append(");\n");
+        }
+        content.append("\n        ").append(getUserEntityName()).append(" savedUser = userRepository.save(user);\n");
         content.append("        return ApiResponse.success(\"注册成功\", savedUser);\n");
         content.append("    }\n\n");
         
@@ -358,14 +529,23 @@ public class JwtGenerator {
         content.append("    public static class RegisterRequest {\n");
         content.append("        private String username;\n");
         content.append("        private String password;\n");
-        content.append("        private String role;\n\n");
+        if ("String".equals(roleFieldJavaType)) {
+            content.append("        private String role;\n\n");
+        } else {
+            content.append("        private ").append(roleFieldJavaType).append(" role;\n\n");
+        }
         
         content.append("        public String getUsername() { return username; }\n");
         content.append("        public void setUsername(String username) { this.username = username; }\n");
         content.append("        public String getPassword() { return password; }\n");
         content.append("        public void setPassword(String password) { this.password = password; }\n");
-        content.append("        public String getRole() { return role; }\n");
-        content.append("        public void setRole(String role) { this.role = role; }\n");
+        if ("String".equals(roleFieldJavaType)) {
+            content.append("        public String getRole() { return role; }\n");
+            content.append("        public void setRole(String role) { this.role = role; }\n");
+        } else {
+            content.append("        public ").append(roleFieldJavaType).append(" getRole() { return role; }\n");
+            content.append("        public void setRole(").append(roleFieldJavaType).append(" role) { this.role = role; }\n");
+        }
         content.append("    }\n");
         content.append("}\n");
         
@@ -398,13 +578,13 @@ public class JwtGenerator {
 
         content.append("    @Override\n");
         content.append("    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {\n");
-        content.append("        ").append(getUserEntityName()).append(" user = userRepository.findByUsername(username)\n");
+        content.append("        ").append(getUserEntityName()).append(" user = userRepository.").append(getFindByUsernameMethodName()).append("(username)\n");
         content.append("                .orElseThrow(() -> new UsernameNotFoundException(\"用户不存在: \" + username));\n\n");
         
         content.append("        return new org.springframework.security.core.userdetails.User(\n");
-        content.append("                user.getUsername(),\n");
-        content.append("                user.getPassword(),\n");
-        content.append("                Collections.singletonList(new SimpleGrantedAuthority(\"ROLE_\" + user.getRole()))\n");
+        content.append("                user.").append(getUserFieldGetter(authConfig.getUsernameField())).append("(),\n");
+        content.append("                user.").append(getUserFieldGetter(authConfig.getPasswordField())).append("(),\n");
+        content.append("                Collections.singletonList(new SimpleGrantedAuthority(\"ROLE_\" + user.").append(getUserFieldGetter(authConfig.getRoleField())).append("()))\n");
         content.append("        );\n");
         content.append("    }\n");
         content.append("}\n");

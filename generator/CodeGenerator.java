@@ -14,6 +14,8 @@ public class CodeGenerator {
     private final GeneratorConfig generatorConfig;
     private final AuthConfig authConfig;
     private boolean hasAuthTable = false;
+    private boolean hasUsernameField = false;
+    private boolean hasPasswordField = false;
     private boolean hasRoleField = false;
     
     public CodeGenerator(GeneratorConfig generatorConfig, AuthConfig authConfig) {
@@ -26,9 +28,14 @@ public class CodeGenerator {
             if (authConfig.getTableName().equalsIgnoreCase(table.getTableName())) {
                 hasAuthTable = true;
                 for (ColumnInfo column : table.getColumns()) {
+                    if (authConfig.getUsernameField().equalsIgnoreCase(column.getColumnName())) {
+                        hasUsernameField = true;
+                    }
+                    if (authConfig.getPasswordField().equalsIgnoreCase(column.getColumnName())) {
+                        hasPasswordField = true;
+                    }
                     if (authConfig.getRoleField().equalsIgnoreCase(column.getColumnName())) {
                         hasRoleField = true;
-                        break;
                     }
                 }
                 break;
@@ -37,6 +44,10 @@ public class CodeGenerator {
         
         if (hasAuthTable && hasRoleField) {
             System.out.println("✓ 检测到 " + authConfig.getTableName() + " 表包含 " + authConfig.getRoleField() + " 字段，将启用权限验证");
+        }
+        if (hasAuthTable && (!hasUsernameField || !hasPasswordField || !hasRoleField)) {
+            System.out.println("! 警告: " + authConfig.getTableName() + " 表缺少认证相关字段，当前配置为 username="
+                    + authConfig.getUsernameField() + ", password=" + authConfig.getPasswordField() + ", role=" + authConfig.getRoleField());
         }
     }
     
@@ -310,7 +321,8 @@ public class CodeGenerator {
         content.append("public interface ").append(repositoryName).append(" extends JpaRepository<").append(className).append(", Long>, JpaSpecificationExecutor<").append(className).append("> {\n");
         
         if (getUserEntityClassName().equals(className)) {
-            content.append("    Optional<").append(getUserEntityClassName()).append("> findByUsername(String username);\n");
+            content.append("    Optional<").append(getUserEntityClassName()).append("> ")
+                    .append(getFindByUsernameMethodName()).append("(String username);\n");
         }
         
         content.append("}\n");
@@ -500,7 +512,7 @@ public class CodeGenerator {
                 content.append("        if (username == null) {\n");
                 content.append("            throw new RuntimeException(\"未登录\");\n");
                 content.append("        }\n");
-                content.append("        return userRepository.findByUsername(username)\n");
+                content.append("        return userRepository.").append(getFindByUsernameMethodName()).append("(username)\n");
                 content.append("                .map(").append(getUserEntityClassName()).append("::getId)\n");
                 content.append("                .orElseThrow(() -> new RuntimeException(\"当前用户不存在\"));\n");
                 content.append("    }\n\n");
@@ -569,13 +581,15 @@ public class CodeGenerator {
                 content.append("        String currentUsername = getCurrentUsername();\n");
                 content.append("        return service.findById(id)\n");
                 content.append("                .map(existing -> {\n");
-                content.append("                    if (!isAdmin() && !existing.getUsername().equals(currentUsername)) {\n");
+                content.append("                    if (!isAdmin() && !existing.")
+                        .append(getUserFieldGetter(authConfig.getUsernameField()))
+                        .append("().equals(currentUsername)) {\n");
                 content.append("                        throw new RuntimeException(\"只能修改自己的信息\");\n");
                 content.append("                    }\n");
                 
                 for (ColumnInfo column : table.getColumns()) {
                     String fieldName = Generator.util.StringUtils.toCamelCase(column.getColumnName(), false);
-                    if (!column.isPrimaryKey() && !isAutoFillField(column) && !generatorConfig.getExcludedFields().contains(fieldName) && !generatorConfig.getExcludedFields().contains(column.getColumnName())) {
+                    if (!column.isPrimaryKey() && !isAutoFillField(column) && !isExcludedField(column)) {
                         content.append("                    existing.set").append(Generator.util.StringUtils.toCamelCase(column.getColumnName(), true))
                                 .append("(request.get").append(Generator.util.StringUtils.toCamelCase(column.getColumnName(), true)).append("());\n");
                     }
@@ -602,7 +616,7 @@ public class CodeGenerator {
                 
                 for (ColumnInfo column : table.getColumns()) {
                     String fieldName = Generator.util.StringUtils.toCamelCase(column.getColumnName(), false);
-                    if (!column.isPrimaryKey() && !isAutoFillField(column) && !generatorConfig.getExcludedFields().contains(fieldName) && !generatorConfig.getExcludedFields().contains(column.getColumnName())) {
+                    if (!column.isPrimaryKey() && !isAutoFillField(column) && !isExcludedField(column)) {
                         content.append("                    existing.set").append(Generator.util.StringUtils.toCamelCase(column.getColumnName(), true))
                                 .append("(request.get").append(Generator.util.StringUtils.toCamelCase(column.getColumnName(), true)).append("());\n");
                     }
@@ -625,7 +639,7 @@ public class CodeGenerator {
                 
                 for (ColumnInfo column : table.getColumns()) {
                     String fieldName = Generator.util.StringUtils.toCamelCase(column.getColumnName(), false);
-                    if (!column.isPrimaryKey() && !isAutoFillField(column) && !generatorConfig.getExcludedFields().contains(fieldName) && !generatorConfig.getExcludedFields().contains(column.getColumnName())) {
+                    if (!column.isPrimaryKey() && !isAutoFillField(column) && !isExcludedField(column)) {
                         content.append("                    existing.set").append(Generator.util.StringUtils.toCamelCase(column.getColumnName(), true))
                                 .append("(request.get").append(Generator.util.StringUtils.toCamelCase(column.getColumnName(), true)).append("());\n");
                     }
@@ -646,7 +660,7 @@ public class CodeGenerator {
             
             for (ColumnInfo column : table.getColumns()) {
                 String fieldName = Generator.util.StringUtils.toCamelCase(column.getColumnName(), false);
-                if (!column.isPrimaryKey() && !isAutoFillField(column) && !generatorConfig.getExcludedFields().contains(fieldName) && !generatorConfig.getExcludedFields().contains(column.getColumnName())) {
+                if (!column.isPrimaryKey() && !isAutoFillField(column) && !isExcludedField(column)) {
                     content.append("                    existing.set").append(Generator.util.StringUtils.toCamelCase(column.getColumnName(), true))
                             .append("(request.get").append(Generator.util.StringUtils.toCamelCase(column.getColumnName(), true)).append("());\n");
                 }
@@ -718,7 +732,7 @@ public class CodeGenerator {
             content.append("        ").append(dtoName).append(" dto = new ").append(dtoName).append("();\n");
             for (ColumnInfo column : table.getColumns()) {
                 String fieldName = Generator.util.StringUtils.toCamelCase(column.getColumnName(), false);
-                if (!generatorConfig.getExcludedFields().contains(fieldName) && !generatorConfig.getExcludedFields().contains(column.getColumnName())) {
+                if (!isExcludedField(column)) {
                     content.append("        dto.set").append(Generator.util.StringUtils.toCamelCase(column.getColumnName(), true))
                             .append("(entity.get").append(Generator.util.StringUtils.toCamelCase(column.getColumnName(), true)).append("());\n");
                 }
@@ -730,7 +744,7 @@ public class CodeGenerator {
             content.append("        ").append(className).append(" entity = new ").append(className).append("();\n");
             for (ColumnInfo column : table.getColumns()) {
                 String fieldName = Generator.util.StringUtils.toCamelCase(column.getColumnName(), false);
-                if (!isAutoFillField(column) && !generatorConfig.getExcludedFields().contains(fieldName) && !generatorConfig.getExcludedFields().contains(column.getColumnName())) {
+                if (!isAutoFillField(column) && !isExcludedField(column)) {
                     content.append("        entity.set").append(Generator.util.StringUtils.toCamelCase(column.getColumnName(), true))
                             .append("(dto.get").append(Generator.util.StringUtils.toCamelCase(column.getColumnName(), true)).append("());\n");
                 }
@@ -758,7 +772,7 @@ public class CodeGenerator {
         boolean hasDateTime = false;
         for (ColumnInfo column : table.getColumns()) {
             String fieldName = Generator.util.StringUtils.toCamelCase(column.getColumnName(), false);
-            if (generatorConfig.getExcludedFields().contains(fieldName) || generatorConfig.getExcludedFields().contains(column.getColumnName())) {
+            if (isExcludedField(column)) {
                 continue;
             }
             if ("DATE".equals(column.getColumnType())) hasDate = true;
@@ -780,7 +794,7 @@ public class CodeGenerator {
         
         for (ColumnInfo column : table.getColumns()) {
             String fieldName = Generator.util.StringUtils.toCamelCase(column.getColumnName(), false);
-            if (generatorConfig.getExcludedFields().contains(fieldName) || generatorConfig.getExcludedFields().contains(column.getColumnName())) {
+            if (isExcludedField(column)) {
                 continue;
             }
             
@@ -806,5 +820,20 @@ public class CodeGenerator {
 
     private String getUserEntityClassName() {
         return Generator.util.StringUtils.toCamelCase(authConfig.getTableName(), true);
+    }
+
+    private String getFindByUsernameMethodName() {
+        return "findBy" + Generator.util.StringUtils.toCamelCase(authConfig.getUsernameField(), true);
+    }
+
+    private String getUserFieldGetter(String fieldName) {
+        return "get" + Generator.util.StringUtils.toCamelCase(fieldName, true);
+    }
+
+    private boolean isExcludedField(ColumnInfo column) {
+        String fieldName = Generator.util.StringUtils.toCamelCase(column.getColumnName(), false);
+        return generatorConfig.getExcludedFields().contains(fieldName)
+                || generatorConfig.getExcludedFields().contains(column.getColumnName())
+                || authConfig.getPasswordField().equalsIgnoreCase(column.getColumnName());
     }
 }

@@ -3,7 +3,7 @@ package Generator.config;
 public class DatabaseConfig {
     private String host = "localhost";
     private String port = "3306";
-    private String name = "my_spring";
+    private String name = "article";
     private String user = "root";
     private String password = "123456";
     

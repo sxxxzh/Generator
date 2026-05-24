@@ -4,7 +4,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class AuthConfig {
-    private String tableName = "user";
+    private String tableName = "users";
+    private String usernameField = "username";
+    private String passwordField = "password";
     private String roleField = "role";
     private String roleAdmin = "ADMIN";
     private String roleUser = "USER";
@@ -31,6 +33,22 @@ public class AuthConfig {
     
     public void setRoleField(String roleField) {
         this.roleField = roleField;
+    }
+
+    public String getUsernameField() {
+        return usernameField;
+    }
+
+    public void setUsernameField(String usernameField) {
+        this.usernameField = usernameField;
+    }
+
+    public String getPasswordField() {
+        return passwordField;
+    }
+
+    public void setPasswordField(String passwordField) {
+        this.passwordField = passwordField;
     }
     
     public String getRoleAdmin() {

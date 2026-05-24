@@ -9,7 +9,8 @@
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `basePackage` | String | `"cn.example"` | Java 根包名 |
-| `outputPath` | String | `"src/main/java"` | 代码输出目录（相对路径） |
+| `outputPath` | String | `"src/main/java"` | **后端 Java 代码**输出目录（相对路径） |
+| `frontendOutputPath` | String | `"generated-frontend"` | **前端独立部署代码**输出目录（相对路径） |
 | `applicationName` | String | `"ExampleApplication"` | Spring Boot 启动类名 |
 | `apiBase` | String | `"http://localhost:8080/api"` | **完整后端 API 地址**（写入前端 `api.js`） |
 | `useDTO` | boolean | `true` | Controller 是否使用 DTO（false 则直接用 Entity） |
@@ -73,6 +74,8 @@ JWT 配置写入各环境 YML 文件（非 `application.yml`），每个环境�
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `tableName` | String | `"user"` | 用户表名（用于检测是否启用权限验证） |
+| `usernameField` | String | `"username"` | 用户登录名字段名 |
+| `passwordField` | String | `"password"` | 用户密码字段名 |
 | `roleField` | String | `"role"` | 角色字段名（存在于 `user` 表中才启用） |
 | `roleAdmin` | String | `"ADMIN"` | 管理员角色标识 |
 | `roleUser` | String | `"USER"` | 普通用户角色标识 |
@@ -85,12 +88,18 @@ JWT 配置写入各环境 YML 文件（非 `application.yml`），每个环境�
 只有**同时满足**以下条件，Controller 才会包含 `@PreAuthorize` 注解：
 
 1. 数据库中存在名为 `user` 的表（`tableName`）
-2. 该表包含 `role` 列（`roleField`）
+2. 该表包含角色列（`roleField`）
 3. `enableAllTableAuth = true`
 
 ### 用户所有权机制
 
 `userOwnedTables` 中的表，Controller 的 update/delete 会校验当前用户是否为数据所有者。非 ADMIN 且非所有者时抛出 403 异常。
+
+### 角色字段类型说明
+
+- 如果 `roleField` 在数据库里是 `VARCHAR/CHAR/TEXT`，可继续使用 `ADMIN/USER/GUEST`
+- 如果 `roleField` 在数据库里是 `TINYINT/INT/BIGINT` 等数值类型，则 `roleAdmin`、`roleUser`、`roleGuest` 必须配置成可转换的实际数据库值，例如 `"1"`、`"2"`、`"3"`
+- 生成器会按角色字段真实 Java 类型生成赋值转换逻辑，例如 `Byte.valueOf(...)`
 
 ### 方法说明
 
@@ -112,10 +121,15 @@ public static void main(String[] args) {
     
     GeneratorConfig genConfig = new GeneratorConfig();
     genConfig.setBasePackage("com.myapp");    // 改用自定义包名
+    genConfig.setFrontendOutputPath("frontend-admin"); // 生成独立部署前端目录
     genConfig.setApiBase("http://myhost:9090/api");  // 生产环境 API 地址
     genConfig.getSelectedTables().add("order");      // 只生成 order 表
     
     AuthConfig authConfig = new AuthConfig();
+    authConfig.setTableName("sys_user");
+    authConfig.setUsernameField("login_name");
+    authConfig.setPasswordField("login_password");
+    authConfig.setRoleField("user_role");
     authConfig.setEnableAllTableAuth(false);  // 关闭权限验证
     authConfig.addUserOwnedTable("post", "author_id");
     
@@ -124,4 +138,27 @@ public static void main(String[] args) {
     
     // ... 后续逻辑不变
 }
+```
+
+## 前后端分离说明
+
+- 生成器当前默认按**前后端分离**方式输出前端代码
+- 前端页面、CSS、JS 会输出到 `frontendOutputPath` 指定目录，而不是 Spring Boot 的 `resources/static`
+- 后端仅生成 API、JWT、安全配置等服务端代码，不再负责前端静态资源映射和页面放行
+- 当前前端产物结构为：
+
+```text
+{frontendOutputPath}/
+  index.html
+  assets/
+    css/style.css
+    js/app.js
+    js/api.js
+    js/auth.js
+    js/toast.js
+    js/table.js
+  pages/
+    login.html
+    register.html
+    {entity}.html
 ```

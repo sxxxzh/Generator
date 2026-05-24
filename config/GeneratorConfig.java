@@ -6,6 +6,7 @@ import java.util.Set;
 public class GeneratorConfig {
     private String basePackage = "cn.example";
     private String outputPath = "src/main/java";
+    private String frontendOutputPath = "generated-frontend";
     private String applicationName = "ExampleApplication";
     private String apiBase = "http://localhost:8080/api";
     private boolean useDTO = true;
@@ -70,6 +71,14 @@ public class GeneratorConfig {
     
     public void setOutputPath(String outputPath) {
         this.outputPath = outputPath;
+    }
+
+    public String getFrontendOutputPath() {
+        return frontendOutputPath;
+    }
+
+    public void setFrontendOutputPath(String frontendOutputPath) {
+        this.frontendOutputPath = frontendOutputPath;
     }
     
     public boolean isUseDTO() {
